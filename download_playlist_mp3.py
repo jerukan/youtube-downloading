@@ -1,86 +1,75 @@
-import sys
-import os
 import argparse
+from pathlib import Path
 import traceback
 
 import eyed3
 from pytube import YouTube, Playlist
-from ffmpy import FFmpeg
-import pytube
+import ffmpeg
 
 
 """
-The YouTube streams do have audio streams that can be downloaded, which would be great if they didn't download
-twice the length they're supposed to be. The other audio only formats don't work really well, so I'm stuck
-here converting mp4s to mp3s. reeeee
+Script to download a YouTube playlist as mp3 files.
 """
-
-
-def force_remove(path):
-    try:
-        os.remove(path)
-    except FileNotFoundError:
-        pass
 
 
 def main():
-
     parser = argparse.ArgumentParser(description="Downloads a YouTube playlist as mp3 files to a specified directory.")
-    parser.add_argument("playlist", type=str, help="YouTube link to a public playlist")
-    parser.add_argument("outdir", type=str, help="Full path to download the mp3 files to")
+    parser.add_argument("playlist", type=str, help="YouTube link to a public/unlisted playlist")
     parser.add_argument("overwrite", type=bool, help="If true, overwrite existing mp3 files", nargs="?", const=True, default=True)
 
     args = parser.parse_args()
 
     pl = Playlist(args.playlist)
-    outputDir = args.outdir
+    pltitle = pl.title
+    outdir = Path("downloads", pltitle)
 
     vidqueue = list(pl.video_urls)
 
     while len(vidqueue) > 0:
-        vidURL = vidqueue.pop(0)
+        url = vidqueue.pop(0)
         try:
-            print(f"Preparing {vidURL} for download.")
-            yt = YouTube(vidURL)
-            print(f"{yt.title} from {vidURL} YouTube object successfully created.")
+            # download from youtube
+            yt = YouTube(url)
+            print(f"Preparing {yt.title} from {url}")
+            # YouTube audio streams have some issues where they download as twice the intended
+            # length, so we have to use ffmpeg to convert them to an mp3 in order to resolve
+            # those issues.
             strm = yt.streams.filter(only_audio=True).first()
             author = yt.author
             if author[-7:] == "- Topic":
                 author = author[:-8]
-            vidTitle = yt.title
-            fileName = strm.default_filename
-            dlPath = os.path.join(outputDir, fileName)
-
-            outputNameSplit = fileName.split(".")
-            outputNameSplit[len(outputNameSplit) - 1] = "mp3"
-            outputName = ".".join(outputNameSplit)
-            outputPath = os.path.join(outputDir, outputName)
-            if os.path.exists(outputPath) and not args.overwrite:
-                print(f"Audio file {outputName} already exists. Skipping video...")
-                continue
-
+            title = yt.title
+            filename = strm.default_filename
+            dlpath = outdir / filename
             print("Downloading from stream...")
-            strm.download(outputDir)
-            print(f"{vidTitle} from {vidURL} successfully downloaded.")
+            strm.download(outdir)
+            print(f"{dlpath} successfully downloaded.")
 
-            print(f"Converting file {fileName} to mp3")
-            ff = FFmpeg(
-                inputs={dlPath: "-y"},  # autmatically overwrite
-                outputs={outputPath: "-vn"}  # remove video data
-            )
-            ff.run()
-            print(f"File {outputName} successfully created.")
-            os.remove(dlPath)
-            print(f"File {fileName} removed.")
+            # convert to mp3 with ffmpeg
+            mp3_name_split = filename.split(".")
+            mp3_name_split[-1] = "mp3"
+            mp3_name = ".".join(mp3_name_split)
+            mp3_path = outdir / mp3_name
+            if mp3_path.exists() and not args.overwrite:
+                print(f"Audio file {mp3_path} already exists. Skipping video...")
+                continue
+            print(f"Converting file {dlpath} to mp3")
+            instream = ffmpeg.input(str(dlpath), y=None)
+            outstream = ffmpeg.output(instream, str(mp3_path), vn=None)
+            ffmpeg.run(outstream)
+            print(f"{mp3_path} created.")
+            dlpath.unlink()
+            print(f"{dlpath} removed.")
 
-            audiofile = eyed3.load(outputPath)
+            # add mp3 metadata
+            audiofile = eyed3.load(mp3_path)
             audiofile.tag.artist = author
-            audiofile.tag.title = vidTitle
+            audiofile.tag.title = title
             audiofile.tag.save()
         except Exception as e:
             traceback.print_exc()
-            print(f"Failed to download {vidURL}, will retry at the end...")
-            vidqueue.append(vidURL)
+            print(f"Failed to download {url}, will retry at the end...")
+            vidqueue.append(url)
 
 
 if __name__ == "__main__":
