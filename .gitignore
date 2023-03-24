@@ -1,0 +1,10 @@
+*.mp3
+*.mp4
+*.zip
+*.description
+
+.DS_Store
+
+__pycache__/
+*.py[cod]
+*$py.class
