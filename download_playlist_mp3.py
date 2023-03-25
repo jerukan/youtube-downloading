@@ -46,9 +46,7 @@ def main():
             print(f"{dlpath} successfully downloaded.")
 
             # convert to mp3 with ffmpeg
-            mp3_name_split = filename.split(".")
-            mp3_name_split[-1] = "mp3"
-            mp3_name = ".".join(mp3_name_split)
+            mp3_name = f"{dlpath.stem} - {author}.mp3"
             mp3_path = outdir / mp3_name
             if mp3_path.exists() and not args.overwrite:
                 print(f"Audio file {mp3_path} already exists. Skipping video...")
