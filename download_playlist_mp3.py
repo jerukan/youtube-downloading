@@ -7,9 +7,9 @@ import traceback
 import requests
 
 import eyed3
+import ffmpeg
 from PIL import Image
 from pytube import YouTube, Playlist
-import ffmpeg
 
 
 """
@@ -17,19 +17,27 @@ Script to download a YouTube playlist as mp3 files.
 """
 
 
-def convert_to_mp3(inpath, outpath, artist=None, title=None, tnpath=None):
+def convert_to_mp3(inpath, outpath, artist=None, title=None, album=None, tnpath=None):
     """Convert mp4 to mp3 with ffmpeg"""
+    outpath_unfixed = outpath.parent / f"{outpath.stem}_unfixed{outpath.suffix}"
     instream = ffmpeg.input(str(inpath), y=None)
-    outstream = ffmpeg.output(instream, str(outpath), vn=None)
+    outstream = ffmpeg.output(instream, str(outpath_unfixed), vn=None)
     ffmpeg.run(outstream)
+    # something about the apple music player makes these songs double the length
+    # if they aren't re-encoded, so we have to rerun ffmpeg on the mp3.
+    fixinstream = ffmpeg.input(str(outpath_unfixed), y=None)
+    fixoutstream = ffmpeg.output(fixinstream, str(outpath), acodec="copy")
+    ffmpeg.run(fixoutstream)
     print(f"{outpath} created.")
     inpath.unlink()
-    print(f"{inpath} removed.")
+    outpath_unfixed.unlink()
+    print(f"{inpath} and {outpath_unfixed} removed.")
 
     # add mp3 metadata
     audiofile = eyed3.load(outpath)
     audiofile.tag.artist = artist
     audiofile.tag.title = title
+    audiofile.tag.album = album
     if tnpath is not None:
         with open(tnpath, "rb") as tfile:
             thumbnail_data = tfile.read()
@@ -45,13 +53,21 @@ def download_and_convert(url, outdir, overwrite):
         try:
             # download from youtube
             yt = YouTube(url)
+            vidid = yt.video_id
             title = yt.title
             author = yt.author
+            album = None
             # check if video from youtube music
             from_ytmusic = False
             if author[-7:] == "- Topic":
                 author = author[:-8]
                 from_ytmusic = True
+                desc = yt.description
+                descsplit = list(filter(lambda x: x.strip(), desc.splitlines()))
+                # getting metadata for the album isn't working anymore, so we have to
+                # infer from the description
+                # I think auto generated descriptions have the album on the 3rd line
+                album = descsplit[2]
             # slashes screw with filepaths
             author = author.replace("/", "")
 
@@ -85,11 +101,11 @@ def download_and_convert(url, outdir, overwrite):
             print(f"{dlpath} successfully downloaded.")
 
             # convert to mp3 with ffmpeg
-            convert_to_mp3(dlpath, mp3_path, artist=author, title=title, tnpath=thumbnail_path)
+            convert_to_mp3(dlpath, mp3_path, artist=author, title=title, album=album, tnpath=thumbnail_path)
             succeeded = True
         except Exception:
             traceback.print_exc()
-            print(f"Failed to download {url}, will retrying...")
+            print(f"Failed to download {url}, will retry...")
 
 
 def main():
