@@ -1,5 +1,6 @@
 import argparse
 import concurrent.futures
+from json import loads
 from io import BytesIO
 from pathlib import Path
 import threading
@@ -9,12 +10,36 @@ import requests
 import eyed3
 import ffmpeg
 from PIL import Image
+import pytube
 from pytube import YouTube, Playlist
 
 
 """
 Script to download a YouTube playlist as mp3 files.
+
+Usage: python download_playlist_mp3.py <url>
 """
+
+
+def get_description(video: YouTube) -> str:
+    """
+    yt.description is None, it literally doesn't work right now. Workaround for now.
+
+    https://stackoverflow.com/questions/77481385/pytube-library-getting-error-in-video-description
+    """
+    i: int = video.watch_html.find('"shortDescription":"')
+    desc: str = '"'
+    i += 20  # excluding the `"shortDescription":"`
+    while True:
+        letter = video.watch_html[i]
+        desc += letter  # letter can be added in any case
+        i += 1
+        if letter == '\\':
+            desc += video.watch_html[i]
+            i += 1
+        elif letter == '"':
+            break
+    return loads(desc)
 
 
 def convert_to_mp3(inpath, outpath, artist=None, title=None, album=None, tnpath=None):
@@ -58,11 +83,12 @@ def download_and_convert(url, outdir, overwrite):
             author = yt.author
             album = None
             # check if video from youtube music
-            from_ytmusic = False
-            if author[-7:] == "- Topic":
-                author = author[:-8]
+            from_ytmusic = yt._vid_info is not None and yt._vid_info["videoDetails"]["musicVideoType"] == "MUSIC_VIDEO_TYPE_ATV"
+            if from_ytmusic:
+                # author = author[:-8]
                 from_ytmusic = True
-                desc = yt.description
+                # desc = yt.description
+                desc = get_description(yt)
                 descsplit = list(filter(lambda x: x.strip(), desc.splitlines()))
                 # getting metadata for the album isn't working anymore, so we have to
                 # infer from the description
@@ -71,7 +97,7 @@ def download_and_convert(url, outdir, overwrite):
             # slashes screw with filepaths
             author = author.replace("/", "")
 
-            print(f"Preparing {title} from {url}")
+            print(f"Preparing {title} from {url} [author: {author}, from_ytmusic: {from_ytmusic}]")
             # YouTube audio streams have some issues where they download as twice the intended
             # length, so we have to use ffmpeg to convert them to an mp3 in order to resolve
             # those issues.
@@ -89,10 +115,11 @@ def download_and_convert(url, outdir, overwrite):
             response = requests.get(yt.thumbnail_url)
             img = Image.open(BytesIO(response.content))
             # thumbnails are 640 x 480
-            if from_ytmusic:
-                img = img.crop((140, 60, 140 + 360, 60 + 360))
-            else:
-                img = img.crop((0, 60, 640, 60 + 360))
+            # thumbnails from yt music don't need to be cropped anymore
+            # if from_ytmusic:
+            #     img = img.crop((140, 60, 140 + 360, 60 + 360))
+            # else:
+            #     img = img.crop((0, 60, 640, 60 + 360))
             img.thumbnail((300, 300))
             img.save(thumbnail_path, "JPEG")
             # download audio mp4
@@ -134,8 +161,9 @@ def main():
             except Exception:
                 traceback.print_exc()
             else:
-                print(f"Succeded with download and convertsion of {url}")
+                print(f"Finished processing of {url}")
 
 
 if __name__ == "__main__":
+    # pytube.innertube._default_clients["ANDROID"] = pytube.innertube._default_clients["WEB"]
     main()
